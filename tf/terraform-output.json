@@ -1,0 +1,40 @@
+{
+  "alb_dns": {
+    "sensitive": false,
+    "type": "string",
+    "value": "alb-public-81986731.us-east-1.elb.amazonaws.com"
+  },
+  "app_public_ip": {
+    "sensitive": false,
+    "type": [
+      "object",
+      {
+        "app 1": "string",
+        "app 2": "string"
+      }
+    ],
+    "value": {
+      "app 1": "54.205.165.228",
+      "app 2": "3.84.206.128"
+    }
+  },
+  "db_private_ip": {
+    "sensitive": false,
+    "type": "string",
+    "value": "10.0.3.226"
+  },
+  "public_subnet": {
+    "sensitive": false,
+    "type": [
+      "object",
+      {
+        "public subnet 1": "string",
+        "public subnet 2": "string"
+      }
+    ],
+    "value": {
+      "public subnet 1": "subnet-0b8c15d04c27ba3ce",
+      "public subnet 2": "subnet-06215be9f6f3af2f8"
+    }
+  }
+}

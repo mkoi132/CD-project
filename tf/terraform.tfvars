@@ -1,0 +1,12 @@
+public_subnet_cidrs  = ["10.0.1.0/24", "10.0.2.0/24"]
+private_subnet_cidrs = "10.0.3.0/24"
+env_prefix           = "dev"
+vpc_cidr_blocks      = "10.0.0.0/16"
+instance_type        = "t2.micro"
+app_name             = "assigment2"
+db_port              = "5432"
+app_ingressRule      = [22, 80, 443, 5432]
+db_ingressRule       = [22]
+alb_ingressRule      = [80, 443]
+my_region = "us-east-1"   
+path_to_public_key = "~/.ssh/github_sdo_key.pub"

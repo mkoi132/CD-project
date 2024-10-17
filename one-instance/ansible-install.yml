@@ -1,0 +1,74 @@
+---
+- hosts: all
+  become: yes
+  tasks:
+    - name: Update apt and install dependencies
+      apt:
+        update_cache: yes
+        name:
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - software-properties-common
+          - gnupg
+          - python3-pip
+
+    - name: Add Docker GPG key
+      apt_key:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        state: present
+
+    - name: Add Docker repository
+      apt_repository:
+        repo: deb [arch=amd64] https://download.docker.com/linux/ubuntu jammy stable
+        state: present
+
+    - name: Install Docker
+      apt:
+        name: docker-ce
+        state: present
+        update_cache: yes
+
+    - name: Install Docker Python module
+      pip:
+        name: docker
+        executable: pip3
+        state: present
+
+    - name: Add the user to Docker group
+      user:
+        name: ubuntu
+        groups: docker, adm
+        append: yes
+
+    - name: Reconnect to server session
+      meta: reset_connection
+
+    - name: Ensure Docker service is started
+      service:
+        name: docker
+        state: started
+        enabled: yes
+    - name: Install Docker Compose
+      apt:
+        name: docker-compose
+        state: present
+        update_cache: yes
+    - name: Copy snapshot SQL file to remote host
+      copy:
+        src: ../misc/snapshot-prod-data.sql
+        dest: /home/ubuntu/snapshot-prod-data.sql
+        owner: ubuntu
+        group: ubuntu
+        mode: '0644'
+    - name: Copy docker-compose.yml to EC2 instance
+      copy:
+        src: ./docker-compose.yml
+        dest: /home/ubuntu/docker-compose.yml
+        mode: '0644'
+    - name: Deploy Docker Compose
+      community.docker.docker_compose_v2:
+        project_src: /home/ubuntu/
+        files:
+        - docker-compose.yml
+        state: present

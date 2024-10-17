@@ -1,0 +1,30 @@
+
+services:
+  db:
+    image: "postgres:14.7"
+    container_name: foo_db
+    environment:
+      POSTGRES_PASSWORD: devops
+      POSTGRES_USER: pete
+      POSTGRES_DB: foo
+    ports:
+      - "5432:5432"
+    volumes:
+      - /home/ubuntu/snapshot-prod-data.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    restart: always
+  app:
+    image: "mattcul/assignment2app:1.0.0"
+    container_name: foo_app
+    environment:
+      PORT: 3001
+      DB_HOSTNAME: host.docker.internal
+      DB_PORT: 5432
+      DB_USERNAME: pete
+      DB_PASSWORD: devops
+    ports:
+      - "80:3001"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - db
+    restart: always

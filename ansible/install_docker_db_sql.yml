@@ -1,0 +1,122 @@
+---
+- hosts: all
+  become: yes
+  tasks:
+    - name: Update apt and install dependencies
+      apt:
+        update_cache: yes
+        name:
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - software-properties-common
+          - gnupg
+          - python3-pip
+
+    - name: Add Docker GPG key
+      apt_key:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        state: present
+
+    - name: Add Docker repository
+      apt_repository:
+        repo: deb [arch=amd64] https://download.docker.com/linux/ubuntu jammy stable
+        state: present
+
+    - name: Install Docker
+      apt:
+        name: docker-ce
+        state: present
+        update_cache: yes
+
+    - name: Install Docker Python module
+      pip:
+        name: docker
+        executable: pip3
+        state: present
+
+    - name: Add the user to Docker group
+      user:
+        name: ubuntu
+        groups: docker, adm
+        append: yes
+
+    - name: Reconnect to server session
+      meta: reset_connection
+
+    - name: Ensure Docker service is started
+      service:
+        name: docker
+        state: started
+        enabled: yes
+
+- hosts: db
+  become: yes
+  vars:
+    ansible_python_interpreter: /usr/bin/python3
+  tasks:
+
+    - name: Display Python version
+      debug:
+        msg: "Python version is {{ ansible_facts['python_version'] }}"
+
+    - name: Reconnect to server session
+      meta: reset_connection
+
+    - name: Copy snapshot SQL file to remote host
+      copy:
+        src: ../misc/snapshot-prod-data.sql
+        dest: /home/ubuntu/snapshot-prod-data.sql
+        owner: ubuntu
+        group: ubuntu
+        mode: '0644'
+
+    - name: Pull PostgreSQL image
+      community.docker.docker_image:
+        name: postgres
+        tag: "14.7"
+        source: pull
+
+    - name: Run PostgreSQL container with data snapshot
+      community.docker.docker_container:
+        name: foo_db
+        image: postgres:14.7
+        state: started
+        restart_policy: always
+        env:
+          POSTGRES_PASSWORD: devops
+          POSTGRES_USER: pete
+          POSTGRES_DB: foo
+        published_ports:
+          - "5432:5432"
+        volumes:
+          - /home/ubuntu/snapshot-prod-data.sql:/docker-entrypoint-initdb.d/init.sql:ro
+
+- hosts: app
+  become: yes
+  vars:
+    db_private_ip: "{{ hostvars[groups['db'][0]].inventory_hostname }}"
+  tasks:
+    - name: Reconnect to server session
+      meta: reset_connection
+
+    - name: Pull the app image
+      community.docker.docker_image:
+        name: mattcul/assignment2app
+        tag: "1.0.0"
+        source: pull
+
+    - name: Run app container
+      community.docker.docker_container:
+        name: foo_app
+        image: mattcul/assignment2app:1.0.0
+        state: started
+        restart_policy: always
+        env:
+          DB_HOSTNAME: "{{ db_private_ip }}"
+          DB_PORT: "5432"
+          DB_USERNAME: pete
+          DB_PASSWORD: devops
+          PORT: "3001"
+        published_ports:
+          - "80:3001"

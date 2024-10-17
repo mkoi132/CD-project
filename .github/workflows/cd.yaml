@@ -1,0 +1,149 @@
+name: CD pipeline
+
+on:
+  push:
+    branches:
+      - "main"
+  workflow_dispatch:
+
+jobs:
+  bucket-statefile-setup:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    defaults:
+      run:
+        working-directory: misc/
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v3
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: us-east-1
+      - name: Init TF
+        run: terraform init
+      - name: Terraform Apply
+        run: terraform apply -auto-approve
+      - name: Upload s3 statefile
+        uses: actions/upload-artifact@v4
+        with:
+          name: s3.tfstate
+          path: misc/terraform.tfstate
+
+  aws-infra-setup:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: tf/
+    needs: bucket-statefile-setup
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v3
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: us-east-1
+
+      - name: Init TF
+        run: terraform init
+
+      - name: Add SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_KEY }}" > ~/.ssh/github_sdo_key
+          echo "${{ secrets.SSH_KEY_PUB }}" > ~/.ssh/github_sdo_key.pub
+          chmod 600 ~/.ssh/github_sdo_key
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
+
+      - name: Plan to Check for Changes
+        id: plan
+        run: |
+          terraform refresh
+          terraform plan -out=tfplan
+
+      - name: Terraform Apply
+        run: |
+          terraform apply -auto-approve
+          # Output the ALB DNS value and save it to a file
+          touch alb_dns.txt
+          echo "alb_dns=$(terraform output -raw alb_dns)" > alb_dns.txt
+      - name: Upload the app dns
+        uses: actions/upload-artifact@v4
+        with:
+          name: alb_dns
+          path: tf/alb_dns.txt
+
+  ansible-docker-setup:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ansible/
+    needs: aws-infra-setup
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Add SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_KEY }}" > ~/.ssh/github_sdo_key
+          echo "${{ secrets.SSH_KEY_PUB }}" > ~/.ssh/github_sdo_key.pub
+          chmod 600 ~/.ssh/github_sdo_key
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v3
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: us-east-1
+
+      - name: Init TF Generate Ansible Inventory
+        run: |
+          #move to tf directory to execute the inventory generation script
+          cd ../tf 
+          # this init is to synchronize the statefile that is stored on s3 bucket
+          terraform init
+          chmod +x generate_inventory_jq.sh
+          # then run this script to map the output in ansible inventory file format
+          sh generate_inventory_jq.sh
+
+      - name: Verify Ansible Inventory file exists
+        run: |
+          ls -l ./inventory.ini || echo "inventory.ini not found"
+          cat ./inventory.ini || echo "inventory.ini is empty"
+
+      - name: Install Ansible and python3
+        run: |
+          sudo apt-get update && sudo apt-get install -y ansible python3-pip
+          ansible-galaxy collection install community.docker
+
+      - name: Check if Containers are Running
+        id: check_services
+        run: |
+          app_running=$(echo "$result" | grep -q 'foo_app.*running' && echo true || echo false)
+          db_running=$(echo "$result" | grep -q 'foo_db.*running' && echo true || echo false)
+
+
+          # Set the environment variable to indicate if services are running
+          if [[ "$app_running" == "true" && "$db_running" == "true" ]]; then
+            echo "services_running=true" >> $GITHUB_ENV
+          else
+            echo "services_running=false" >> $GITHUB_ENV
+          fi
+      - name: Install required services
+        if: env.services_running != 'true'
+        run: |
+          sleep 20 #Wait for Services to Start
+          ansible-playbook -i ./inventory.ini install_docker_db_sql.yml
+
+      - name: Wait for Services to Start
+        run: sleep 15 # Give services some time to start
