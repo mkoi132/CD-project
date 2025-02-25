@@ -1,4 +1,4 @@
-# COSC2759
+# 
 
 ## Solution design
 
